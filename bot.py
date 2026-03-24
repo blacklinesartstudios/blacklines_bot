@@ -167,4 +167,11 @@ async def main():
 
 # --- RUN ---
 if __name__ == "__main__":
-    asyncio.run(main())
+    app = Application.builder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.PHOTO, on_photo))
+    app.add_handler(CallbackQueryHandler(on_click))
+
+    print("✅ Bot started")
+    app.run_polling()
