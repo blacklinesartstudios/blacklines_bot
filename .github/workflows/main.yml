@@ -1,26 +1,45 @@
 name: Blacklines Bot 24/7
 on:
   schedule:
-    - cron: '0 */4 * * *' # Auto-restarts every 4 hours
+    - cron: '0 */4 * * *'
   push:
     branches: [ main ]
   workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true # Fixes your Node.js warning
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
       - name: Install Tools
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
-          pip install -r requirements.txt
+          # Find and install requirements even if in a subfolder
+          REQ=$(find . -name "requirements.txt" | head -n 1)
+          if [ -n "$REQ" ]; then pip install -r "$REQ"; else pip install python-telegram-bot groq requests Pillow; fi
+
       - name: Run Bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
-        run: python bot.py
+        run: |
+          # Deep search for bot.py
+          BOT_FILE=$(find . -name "bot.py" | head -n 1)
+          if [ -z "$BOT_FILE" ]; then
+            echo "❌ ERROR: bot.py not found! Current files in repo:"
+            ls -R
+            exit 1
+          fi
+          echo "🚀 Running $BOT_FILE..."
+          python "$BOT_FILE"
