@@ -4,11 +4,9 @@ import base64
 import json
 import requests
 import io
-import threading
+import time
 
 from PIL import Image
-from flask import Flask
-
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
@@ -36,18 +34,8 @@ if not HF_TOKEN:
 
 logging.basicConfig(level=logging.INFO)
 
-# --- FLASK APP (for Render port) ---
-web_app = Flask(__name__)
-
-@web_app.route("/")
-def home():
-    return "Bot is running!"
-
 # --- GROQ CLIENT ---
-client = Groq(
-    api_key=GROQ_API_KEY,
-    base_url="https://api.groq.com/openai/v1"
-)
+client = Groq(api_key=GROQ_API_KEY)
 
 HF_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
 
@@ -155,18 +143,16 @@ async def on_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(p, "rb") as img:
             await query.message.reply_photo(img)
 
-# --- RUN ---
-if __name__ == "__main__":
-    # Start Flask server (fix Render port error)
-    threading.Thread(
-        target=lambda: web_app.run(
-            host="0.0.0.0",
-            port=int(os.environ.get("PORT", 10000))
-        ),
-        daemon=True
-    ).start()
+    # cleanup files
+    try:
+        os.remove("input.jpg")
+        for p in paths:
+            os.remove(p)
+    except:
+        pass
 
-    # Start Telegram bot
+# --- MAIN LOOP (RESTART SAFE) ---
+def run_bot():
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
@@ -175,3 +161,12 @@ if __name__ == "__main__":
 
     print("✅ Bot running...")
     app.run_polling()
+
+# --- AUTO RESTART LOOP ---
+if __name__ == "__main__":
+    while True:
+        try:
+            run_bot()
+        except Exception as e:
+            print(f"❌ Crash: {e}")
+            time.sleep(5)
