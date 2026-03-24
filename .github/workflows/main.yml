@@ -26,7 +26,7 @@ jobs:
 
       - name: Run Blacklines Bot
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ 7586837023:AAHLdFd0AT7dixh3IIS73855CzKfC2KY-YA }}
         run: |
           # This command finds bot.py wherever it is and runs it
           BOT_PATH=$(find . -name "bot.py" | head -n 1)
