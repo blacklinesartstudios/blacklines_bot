@@ -4,8 +4,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from groq import Groq
 
-# --- SECURE CREDENTIALS --- 
-# These are pulled from GitHub Secrets (Settings > Secrets > Actions)
+# --- CONFIG ---
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 HF_TOKEN = os.getenv("HF_TOKEN")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
@@ -16,17 +15,21 @@ HF_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-s
 logging.basicConfig(level=logging.INFO)
 
 async def analyze_art(path):
-    with open(path, "rb") as f:
-        img_b64 = base64.b64encode(f.read()).decode('utf-8')
-    resp = client.chat.completions.create(
-        model="llama-3.2-11b-vision-preview",
-        messages=[{"role": "user", "content": [
-            {"type": "text", "text": "As Blacklines Art Studios director, suggest 6 B&W line art styles for this. Return ONLY JSON: {'styles': [{'name': '...', 'prompt': '...'}]}"},
-            {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
-        ]}],
-        response_format={"type": "json_object"}
-    )
-    return json.loads(resp.choices[0].message.content)["styles"]
+    try:
+        with open(path, "rb") as f:
+            img_b64 = base64.b64encode(f.read()).decode('utf-8')
+        resp = client.chat.completions.create(
+            model="llama-3.2-11b-vision-preview",
+            messages=[{"role": "user", "content": [
+                {"type": "text", "text": "Suggest 6 B&W line art styles. Return ONLY JSON: {'styles': [{'name': '...', 'prompt': '...'}]}"},
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
+            ]}],
+            response_format={"type": "json_object"}
+        )
+        return json.loads(resp.choices[0].message.content)["styles"]
+    except Exception as e:
+        logging.error(f"Analysis failed: {e}")
+        return []
 
 async def generate_images(prompt_keyword):
     paths = []
@@ -42,7 +45,6 @@ async def generate_images(prompt_keyword):
 
 def make_video(img):
     out = "speed_art.mp4"
-    # 3-minute cinematic zoom optimized for GitHub's free runners
     cmd = (
         f"ffmpeg -loop 1 -i {img} -vf "
         "\"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
@@ -52,25 +54,28 @@ def make_video(img):
     subprocess.run(cmd, shell=True)
     return out
 
-async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def on_photo(update, context):
     file = await update.message.photo[-1].get_file()
     await file.download_to_drive("input.jpg")
-    await update.message.reply_text("🖋 Studying image for Blacklines Art Studios...")
     styles = await analyze_art("input.jpg")
+    if not styles:
+        await update.message.reply_text("❌ Analysis failed. Try again.")
+        return
     context.user_data['styles'] = styles
     btns = [[InlineKeyboardButton(s['name'], callback_data=f"s_{i}")] for i, s in enumerate(styles)]
     await update.message.reply_text("Select Style:", reply_markup=InlineKeyboardMarkup(btns))
 
-async def on_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def on_click(update, context):
     query = update.callback_query
     await query.answer()
     idx = int(query.data.split("_")[1])
     style = context.user_data['styles'][idx]
-    await query.edit_message_text(f"🎨 Generating 4 versions of {style['name']}...")
+    await query.edit_message_text(f"🎨 Generating {style['name']}...")
     paths = await generate_images(style['prompt'])
-    for p in paths:
-        await query.message.reply_photo(open(p, 'rb'))
-    await query.message.reply_text("🎬 Creating 3-minute video. Please wait...")
+    if not paths:
+        await query.message.reply_text("❌ Generation failed. HF might be busy.")
+        return
+    for p in paths: await query.message.reply_photo(open(p, 'rb'))
     video = make_video(paths[0])
     await query.message.reply_video(open(video, 'rb'), caption="Final Work - Blacklines Art Studios")
 
