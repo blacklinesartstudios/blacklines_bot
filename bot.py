@@ -4,7 +4,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, MessageHandler, CallbackQueryHandler, filters, ContextTypes
 from groq import Groq
 
-# --- SECURE CREDENTIALS ---
+# --- SECURE CREDENTIALS --- 
 # These are pulled from GitHub Secrets (Settings > Secrets > Actions)
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 HF_TOKEN = os.getenv("HF_TOKEN")
