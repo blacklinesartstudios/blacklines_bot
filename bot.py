@@ -95,4 +95,4 @@ if __name__ == "__main__":
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(CallbackQueryHandler(on_click))
-    app.run_polling()
+    import asyncio  async def main():     app = Application.builder().token(os.getenv("TELEGRAM_BOT_TOKEN")).build()      # add handlers here     # app.add_handler(...)      await app.run_polling()  if __name__ == "__main__":     asyncio.run(main())
