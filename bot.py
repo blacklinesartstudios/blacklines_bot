@@ -9,7 +9,13 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 HF_TOKEN = os.getenv("HF_TOKEN")
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
-client = Groq(api_key=GROQ_API_KEY)
+from groq import Groq
+import os
+
+client = Groq(
+    api_key=os.getenv("GROQ_API_KEY"),
+    base_url="https://api.groq.com/openai/v1"
+)
 HF_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
 
 logging.basicConfig(level=logging.INFO)
