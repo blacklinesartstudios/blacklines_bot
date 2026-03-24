@@ -7,7 +7,7 @@ import io
 import threading
 
 from PIL import Image
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from flask import Flask
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
@@ -36,18 +36,12 @@ if not HF_TOKEN:
 
 logging.basicConfig(level=logging.INFO)
 
-# --- DUMMY SERVER (Render port fix) ---
-def run_dummy_server():
-    port = int(os.environ.get("PORT", 10000))
+# --- FLASK APP (for Render port) ---
+web_app = Flask(__name__)
 
-    class Handler(BaseHTTPRequestHandler):
-        def do_GET(self):
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"Bot is running")
-
-    server = HTTPServer(("0.0.0.0", port), Handler)
-    server.serve_forever()
+@web_app.route("/")
+def home():
+    return "Bot is running!"
 
 # --- GROQ CLIENT ---
 client = Groq(
@@ -72,7 +66,7 @@ async def analyze_art(path):
             messages=[{
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Give 6 black & white line art styles in JSON format with name and prompt"},
+                    {"type": "text", "text": "Give 6 black & white line art styles in JSON with name and prompt"},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
                 ]
             }],
@@ -163,9 +157,16 @@ async def on_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # --- RUN ---
 if __name__ == "__main__":
-    # Fix Render port requirement
-    threading.Thread(target=run_dummy_server, daemon=True).start()
+    # Start Flask server (fix Render port error)
+    threading.Thread(
+        target=lambda: web_app.run(
+            host="0.0.0.0",
+            port=int(os.environ.get("PORT", 10000))
+        ),
+        daemon=True
+    ).start()
 
+    # Start Telegram bot
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
