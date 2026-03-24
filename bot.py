@@ -1,5 +1,7 @@
-import os, logging, base64, json, requests, io, subprocess, asyncio
+import os, logging, base64, json, requests, io, subprocess, threading
 from PIL import Image
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application, MessageHandler, CallbackQueryHandler,
@@ -14,6 +16,19 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 logging.basicConfig(level=logging.INFO)
 
+# --- DUMMY SERVER (for Render port) ---
+def run_dummy_server():
+    port = int(os.environ.get("PORT", 10000))
+
+    class Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"Bot is running")
+
+    server = HTTPServer(("0.0.0.0", port), Handler)
+    server.serve_forever()
+
 # --- GROQ CLIENT ---
 client = Groq(
     api_key=GROQ_API_KEY,
@@ -22,11 +37,11 @@ client = Groq(
 
 HF_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-schnell"
 
-# --- START COMMAND ---
+# --- START ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Send me an image to generate Blacklines styles!")
+    await update.message.reply_text("👋 Send me an image!")
 
-# --- ANALYZE IMAGE ---
+# --- ANALYZE ---
 async def analyze_art(path):
     try:
         with open(path, "rb") as f:
@@ -37,7 +52,7 @@ async def analyze_art(path):
             messages=[{
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Give 6 black & white line art styles. Return JSON: {'styles':[{'name':'','prompt':''}]}"}, 
+                    {"type": "text", "text": "Give 6 black & white line art styles JSON"},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
                 ]
             }],
@@ -48,19 +63,22 @@ async def analyze_art(path):
         return data.get("styles", [])
 
     except Exception as e:
-        logging.error(f"Analysis failed: {e}")
+        logging.error(f"Groq error: {e}")
         return []
 
-# --- GENERATE IMAGES ---
-async def generate_images(prompt_keyword):
+# --- GENERATE ---
+async def generate_images(prompt):
     paths = []
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
 
     for i in range(4):
-        prompt = f"Blacklines line art, {prompt_keyword}, high contrast ink, white background, variation {i}"
-
         try:
-            r = requests.post(HF_URL, headers=headers, json={"inputs": prompt}, timeout=60)
+            r = requests.post(
+                HF_URL,
+                headers=headers,
+                json={"inputs": f"{prompt}, variation {i}"},
+                timeout=60
+            )
 
             if r.status_code == 200:
                 fname = f"gen_{i}.jpg"
@@ -68,38 +86,21 @@ async def generate_images(prompt_keyword):
                 paths.append(fname)
 
         except Exception as e:
-            logging.error(f"HF error: {e}")
+            logging.error(e)
 
     return paths
 
-# --- VIDEO (SAFE: optional) ---
-def make_video(img):
-    out = "speed_art.mp4"
-
-    try:
-        cmd = (
-            f"ffmpeg -loop 1 -i {img} -vf "
-            "\"scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,"
-            "zoompan=z='min(zoom+0.0001,1.5)':d=5400:s=1080x1920\" "
-            "-c:v libx264 -preset ultrafast -t 180 -pix_fmt yuv420p "
-            f"{out} -y"
-        )
-        subprocess.run(cmd, shell=True)
-        return out
-    except:
-        return None
-
-# --- HANDLE PHOTO ---
+# --- PHOTO ---
 async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await update.message.photo[-1].get_file()
     await file.download_to_drive("input.jpg")
 
-    await update.message.reply_text("🖋 Processing your image...")
+    await update.message.reply_text("🖋 Processing...")
 
     styles = await analyze_art("input.jpg")
 
     if not styles:
-        await update.message.reply_text("❌ Could not analyze image.")
+        await update.message.reply_text("❌ Failed")
         return
 
     context.user_data["styles"] = styles
@@ -110,11 +111,11 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     await update.message.reply_text(
-        "Choose a style:",
+        "Choose style:",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-# --- BUTTON CLICK ---
+# --- CLICK ---
 async def on_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -123,46 +124,28 @@ async def on_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     styles = context.user_data.get("styles", [])
 
     if idx >= len(styles):
-        await query.message.reply_text("❌ Invalid selection.")
+        await query.message.reply_text("❌ Invalid")
         return
 
     style = styles[idx]
 
-    await query.edit_message_text(f"🎨 Generating: {style.get('name','Style')}")
+    await query.edit_message_text("🎨 Generating...")
 
     paths = await generate_images(style.get("prompt", ""))
-
-    if not paths:
-        await query.message.reply_text("❌ Image generation failed.")
-        return
 
     for p in paths:
         await query.message.reply_photo(open(p, "rb"))
 
-    # --- VIDEO (optional) ---
-    video = make_video(paths[0])
-    if video and os.path.exists(video):
-        await query.message.reply_video(open(video, "rb"))
-
-    # --- CLEANUP ---
-    try:
-        os.remove("input.jpg")
-        for p in paths:
-            os.remove(p)
-        if video and os.path.exists(video):
-            os.remove(video)
-    except:
-        pass
-
-
-
 # --- RUN ---
 if __name__ == "__main__":
+    # Start dummy server (fix for Render)
+    threading.Thread(target=run_dummy_server).start()
+
     app = Application.builder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.PHOTO, on_photo))
     app.add_handler(CallbackQueryHandler(on_click))
 
-    print("✅ Bot started")
+    print("✅ Bot running...")
     app.run_polling()
