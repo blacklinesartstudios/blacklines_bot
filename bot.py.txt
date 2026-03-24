@@ -1,0 +1,5 @@
+# --- CREDENTIALS (SAFE VERSION) ---
+# We pull these from Environment Variables for security
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+HF_TOKEN = os.getenv("HF_TOKEN")
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
