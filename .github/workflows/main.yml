@@ -1,24 +1,37 @@
 name: Blacklines Bot 24/7
 on:
   schedule:
-    - cron: '0 */4 * * *'
+    - cron: '0 */4 * * *' # Runs every 4 hours
   push:
     branches: [ main ]
-  workflow_dispatch:
+  workflow_dispatch: # Allows you to click "Run workflow" manually
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-      - name: Install Tools
+
+      - name: Install Dependencies
         run: |
           sudo apt-get update && sudo apt-get install -y ffmpeg
-          pip install python-telegram-bot groq requests Pillow
-      - name: Run
+          # This looks for requirements.txt everywhere in the repo
+          find . -name "requirements.txt" -exec pip install -r {} +
+
+      - name: Run Blacklines Bot
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-        run: python bot.py
+        run: |
+          # This command finds bot.py wherever it is and runs it
+          BOT_PATH=$(find . -name "bot.py" | head -n 1)
+          if [ -z "$BOT_PATH" ]; then
+            echo "Error: bot.py not found in the repository!"
+            exit 1
+          fi
+          python "$BOT_PATH"
