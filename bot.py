@@ -1,6 +1,5 @@
 import os
 import logging
-import base64
 import json
 import requests
 import io
@@ -24,13 +23,8 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 HF_TOKEN = os.getenv("HF_TOKEN")
 
-# --- CHECK ENV ---
-if not BOT_TOKEN:
-    raise ValueError("❌ TELEGRAM_BOT_TOKEN missing")
-if not GROQ_API_KEY:
-    raise ValueError("❌ GROQ_API_KEY missing")
-if not HF_TOKEN:
-    raise ValueError("❌ HF_TOKEN missing")
+if not BOT_TOKEN or not GROQ_API_KEY or not HF_TOKEN:
+    raise ValueError("❌ Missing environment variables")
 
 logging.basicConfig(level=logging.INFO)
 
@@ -41,22 +35,16 @@ HF_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-s
 
 # --- START ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Send me an image to generate line art styles 🎨")
+    await update.message.reply_text("👋 Send me an image to generate styles 🎨")
 
-# --- ANALYZE IMAGE ---
-async def analyze_art(path):
+# --- GENERATE STYLES (TEXT ONLY - WORKING) ---
+async def get_styles():
     try:
-        with open(path, "rb") as f:
-            img_b64 = base64.b64encode(f.read()).decode("utf-8")
-
         resp = client.chat.completions.create(
-            model="llama-3.2-90b-vision-preview",
+            model="llama-3.1-8b-instant",
             messages=[{
                 "role": "user",
-                "content": [
-                    {"type": "text", "text": "Give 6 black & white line art styles in JSON with name and prompt"},
-                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
-                ]
+                "content": "Give 6 black & white line art styles in JSON: {styles:[{name,prompt}]}"
             }],
             response_format={"type": "json_object"}
         )
@@ -68,7 +56,7 @@ async def analyze_art(path):
         logging.error(f"Groq error: {e}")
         return []
 
-# --- GENERATE IMAGES ---
+# --- IMAGE GENERATION ---
 async def generate_images(prompt):
     paths = []
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
@@ -92,17 +80,14 @@ async def generate_images(prompt):
 
     return paths
 
-# --- HANDLE PHOTO ---
+# --- PHOTO HANDLER ---
 async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    file = await update.message.photo[-1].get_file()
-    await file.download_to_drive("input.jpg")
+    await update.message.reply_text("🖋 Generating styles...")
 
-    await update.message.reply_text("🖋 Processing your image...")
-
-    styles = await analyze_art("input.jpg")
+    styles = await get_styles()
 
     if not styles:
-        await update.message.reply_text("❌ Failed to analyze image")
+        await update.message.reply_text("❌ Style generation failed")
         return
 
     context.user_data["styles"] = styles
@@ -143,15 +128,14 @@ async def on_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(p, "rb") as img:
             await query.message.reply_photo(img)
 
-    # cleanup files
+    # cleanup
     try:
-        os.remove("input.jpg")
         for p in paths:
             os.remove(p)
     except:
         pass
 
-# --- MAIN LOOP (RESTART SAFE) ---
+# --- RUN BOT ---
 def run_bot():
     app = Application.builder().token(BOT_TOKEN).build()
 
