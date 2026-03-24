@@ -1,22 +1,42 @@
-import os, logging, base64, json, requests, io, subprocess, threading
+import os
+import logging
+import base64
+import json
+import requests
+import io
+import threading
+
 from PIL import Image
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    Application, MessageHandler, CallbackQueryHandler,
-    CommandHandler, filters, ContextTypes
+    Application,
+    MessageHandler,
+    CallbackQueryHandler,
+    CommandHandler,
+    filters,
+    ContextTypes
 )
+
 from groq import Groq
 
 # --- CONFIG ---
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 HF_TOKEN = os.getenv("HF_TOKEN")
-BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+# --- CHECK ENV ---
+if not BOT_TOKEN:
+    raise ValueError("❌ TELEGRAM_BOT_TOKEN missing")
+if not GROQ_API_KEY:
+    raise ValueError("❌ GROQ_API_KEY missing")
+if not HF_TOKEN:
+    raise ValueError("❌ HF_TOKEN missing")
 
 logging.basicConfig(level=logging.INFO)
 
-# --- DUMMY SERVER (for Render port) ---
+# --- DUMMY SERVER (Render port fix) ---
 def run_dummy_server():
     port = int(os.environ.get("PORT", 10000))
 
@@ -39,9 +59,9 @@ HF_URL = "https://api-inference.huggingface.co/models/black-forest-labs/FLUX.1-s
 
 # --- START ---
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("👋 Send me an image!")
+    await update.message.reply_text("👋 Send me an image to generate line art styles 🎨")
 
-# --- ANALYZE ---
+# --- ANALYZE IMAGE ---
 async def analyze_art(path):
     try:
         with open(path, "rb") as f:
@@ -52,7 +72,7 @@ async def analyze_art(path):
             messages=[{
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Give 6 black & white line art styles JSON"},
+                    {"type": "text", "text": "Give 6 black & white line art styles in JSON format with name and prompt"},
                     {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_b64}"}}
                 ]
             }],
@@ -66,7 +86,7 @@ async def analyze_art(path):
         logging.error(f"Groq error: {e}")
         return []
 
-# --- GENERATE ---
+# --- GENERATE IMAGES ---
 async def generate_images(prompt):
     paths = []
     headers = {"Authorization": f"Bearer {HF_TOKEN}"}
@@ -86,21 +106,21 @@ async def generate_images(prompt):
                 paths.append(fname)
 
         except Exception as e:
-            logging.error(e)
+            logging.error(f"HF error: {e}")
 
     return paths
 
-# --- PHOTO ---
+# --- HANDLE PHOTO ---
 async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     file = await update.message.photo[-1].get_file()
     await file.download_to_drive("input.jpg")
 
-    await update.message.reply_text("🖋 Processing...")
+    await update.message.reply_text("🖋 Processing your image...")
 
     styles = await analyze_art("input.jpg")
 
     if not styles:
-        await update.message.reply_text("❌ Failed")
+        await update.message.reply_text("❌ Failed to analyze image")
         return
 
     context.user_data["styles"] = styles
@@ -111,11 +131,11 @@ async def on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
 
     await update.message.reply_text(
-        "Choose style:",
+        "Choose a style:",
         reply_markup=InlineKeyboardMarkup(buttons)
     )
 
-# --- CLICK ---
+# --- BUTTON CLICK ---
 async def on_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -124,22 +144,27 @@ async def on_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     styles = context.user_data.get("styles", [])
 
     if idx >= len(styles):
-        await query.message.reply_text("❌ Invalid")
+        await query.message.reply_text("❌ Invalid selection")
         return
 
     style = styles[idx]
 
-    await query.edit_message_text("🎨 Generating...")
+    await query.edit_message_text(f"🎨 Generating: {style.get('name','Style')}")
 
     paths = await generate_images(style.get("prompt", ""))
 
+    if not paths:
+        await query.message.reply_text("❌ Image generation failed")
+        return
+
     for p in paths:
-        await query.message.reply_photo(open(p, "rb"))
+        with open(p, "rb") as img:
+            await query.message.reply_photo(img)
 
 # --- RUN ---
 if __name__ == "__main__":
-    # Start dummy server (fix for Render)
-    threading.Thread(target=run_dummy_server).start()
+    # Fix Render port requirement
+    threading.Thread(target=run_dummy_server, daemon=True).start()
 
     app = Application.builder().token(BOT_TOKEN).build()
 
